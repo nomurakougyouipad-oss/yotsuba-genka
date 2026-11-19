@@ -34,6 +34,17 @@ service cloud.firestore {
       allow delete: if signedIn();
     }
 
+    // 自分で足した項目・単位（settings/main の1つだけ。みんなで共有）
+    match /settings/{sid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && sid == 'main'
+        && request.resource.data.keys().hasOnly(['presets', 'units', 'updatedAt'])
+        && (!('presets' in request.resource.data) || (request.resource.data.presets is list && request.resource.data.presets.size() <= 100))
+        && (!('units' in request.resource.data) || (request.resource.data.units is list && request.resource.data.units.size() <= 50))
+        && optNum(request.resource.data, 'updatedAt');
+      allow delete: if false;
+    }
+
     // それ以外はすべて禁止
     match /{document=**} {
       allow read, write: if false;
