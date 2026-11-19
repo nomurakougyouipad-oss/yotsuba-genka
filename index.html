@@ -101,6 +101,16 @@ input:disabled,select:disabled{opacity:.8}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chip{padding:7px 12px;border-radius:999px;font-weight:500;font-size:.95rem;border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
 .add{border-style:dashed;color:var(--accent);border-color:var(--accent);background:transparent}
+.chip.reg-open{border-style:dashed;background:transparent}
+.reg{border:2px solid var(--accent);border-radius:12px;padding:14px;display:grid;gap:10px;background:var(--accent-soft)}
+.reg h3{margin:0;font-size:1rem}
+.reg label{display:grid;gap:4px;font-size:.9rem;font-weight:700}
+.reg input,.reg select{width:100%;background:var(--card)}
+.reg-btns{display:flex;gap:8px;flex-wrap:wrap}
+.reg-list{display:grid;gap:6px}
+.reg-item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--card);border-radius:8px;padding:6px 10px}
+.reg-item button{padding:4px 10px;font-size:.9rem}
+.u-new{width:84px}
 .foot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center}
 .confirm{display:none;align-items:center;gap:8px;flex-wrap:wrap}
 .confirm.show{display:flex}
@@ -222,8 +232,15 @@ import { firebaseConfig, FIREBASE_SDK_VERSION } from "./firebase-config.js";
     loaded:false,
     slow:false,
     dirty:new Set(),        // まだ保存していない工事
-    ver:{}, timers:{}, chains:{}
+    ver:{}, timers:{}, chains:{},
+    custom:{presets:[], units:[]},  // 自分で足した項目・単位（全員で共有）
+    form:false,             // 「項目を登録」を開いているか
+    newUnitRow:null         // 新しい単位を入れている行
   };
+  const SKEY = "genka-settings-local-v1";
+  const allPresets = () => PRESETS.concat(S.custom.presets);
+  const allUnits = () => UNITS.concat(S.custom.units.filter(u => !UNITS.includes(u)));
+  const unitOpts = sel => allUnits().map(u=>`<option${u===sel?" selected":""}>${esc(u)}</option>`).join("");
 
   /* ---------- 計算 ---------- */
   function n(v){
@@ -290,6 +307,25 @@ import { firebaseConfig, FIREBASE_SDK_VERSION } from "./firebase-config.js";
   }
   function loadLocal(){
     try{ const a = JSON.parse(localStorage.getItem(LKEY) || "[]"); S.map = new Map(a); }catch(e){ S.map = new Map(); }
+    try{ const c = JSON.parse(localStorage.getItem(SKEY) || "{}"); setCustom(c); }catch(e){}
+  }
+  function setCustom(d){
+    S.custom = {
+      presets: Array.isArray(d && d.presets) ? d.presets.filter(p => p && typeof p.n === "string") : [],
+      units: Array.isArray(d && d.units) ? d.units.filter(u => typeof u === "string" && u) : []
+    };
+  }
+  // 足した項目・単位を保存（field: "presets" か "units"、add: 足す=true／消す=false）
+  async function saveCustom(field, val, add){
+    const list = S.custom[field];
+    const same = x => JSON.stringify(x) === JSON.stringify(val);
+    if(add){ if(!list.some(same)) list.push(val); }
+    else { S.custom[field] = list.filter(x => !same(x)); }
+    if(S.mode === "local"){ try{ localStorage.setItem(SKEY, JSON.stringify(S.custom)); }catch(e){} return; }
+    try{
+      await S.F.setDoc(S.F.doc(S.db, "settings", "main"),
+        {[field]: add ? S.F.arrayUnion(val) : S.F.arrayRemove(val), updatedAt: Date.now()}, {merge:true});
+    }catch(e){ toast("保存できませんでした。電波のよい所でもう一度ためしてください"); }
   }
 
   /* ---------- 画面 ---------- */
@@ -348,8 +384,13 @@ import { firebaseConfig, FIREBASE_SDK_VERSION } from "./firebase-config.js";
   }
 
   function rowHTML(r,i,ro){
-    const opts = UNITS.concat(UNITS.includes(r.u) ? [] : [r.u||"式"]).map(u=>`<option${u===r.u?" selected":""}>${esc(u)}</option>`).join("");
+    const units = allUnits();
+    const opts = units.concat(units.includes(r.u) ? [] : [r.u||"式"]).map(u=>`<option${u===r.u?" selected":""}>${esc(u)}</option>`).join("")
+      + (ro ? "" : `<option value="__new">＋ 新しい単位</option>`);
     const dis = ro ? "disabled" : "";
+    const unitBox = (S.newUnitRow === i && !ro)
+      ? `<input class="u-new" id="r${i}-unew" data-unew="${i}" maxlength="10" placeholder="単位を入力" aria-label="新しい単位（入れたらEnter）">`
+      : `<select id="r${i}-u" data-f="u" aria-label="単位" ${dis}>${opts}</select>`;
     return `<div class="row" data-i="${i}">
       <div class="row-top">
         <input id="r${i}-n" data-f="n" value="${esc(r.n)}" placeholder="項目の名前" aria-label="項目の名前" ${dis}>
@@ -359,9 +400,25 @@ import { firebaseConfig, FIREBASE_SDK_VERSION } from "./firebase-config.js";
         <input id="r${i}-p" data-f="p" inputmode="decimal" value="${fmtIn(r.p)}" placeholder="単価" aria-label="単価（円）" ${dis}>
         <span class="op">円 ×</span>
         <input class="q" id="r${i}-q" data-f="q" inputmode="decimal" value="${r.q===0||r.q===""||r.q==null?"":esc(r.q)}" placeholder="数" aria-label="数量" ${dis}>
-        <select id="r${i}-u" data-f="u" aria-label="単位" ${dis}>${opts}</select>
+        ${unitBox}
         <span class="amt num" data-amt>${yen(rowAmt(r))}</span>
       </div>
+    </div>`;
+  }
+
+  // 「項目を登録」の入力欄
+  function regHTML(){
+    const cp = S.custom.presets, cu = S.custom.units.filter(u => !UNITS.includes(u));
+    return `<div class="reg" id="reg">
+      <h3>よく使う項目を登録する</h3>
+      <p class="note" style="margin:0">登録すると上のボタンに出ます。みんなの画面にも出ます。</p>
+      <label>項目の名前<input id="reg-n" maxlength="30" placeholder="例：クレーン代"></label>
+      <label>単価（円）<input id="reg-p" inputmode="decimal" placeholder="例：50,000"></label>
+      <label>単位<select id="reg-u">${unitOpts("人日")}<option value="__new">＋ 新しい単位</option></select></label>
+      <input id="reg-unew" maxlength="10" placeholder="新しい単位（例：t、本、台）" aria-label="新しい単位" hidden>
+      <div class="reg-btns"><button class="primary" type="button" id="reg-ok">登録する</button><button type="button" id="reg-cancel">とじる</button></div>
+      ${cp.length ? `<div class="reg-list"><b class="note">登録した項目</b>${cp.map((p,i)=>`<div class="reg-item"><span>${esc(p.n)}　<span class="note num">${n(p.p).toLocaleString("ja-JP")}円／${esc(p.u)}</span></span><button class="danger" type="button" data-delp="${i}">消す</button></div>`).join("")}</div>` : ""}
+      ${cu.length ? `<div class="reg-list"><b class="note">足した単位</b>${cu.map(u=>`<div class="reg-item"><span>${esc(u)}</span><button class="danger" type="button" data-delu="${esc(u)}">消す</button></div>`).join("")}</div>` : ""}
     </div>`;
   }
 
@@ -383,8 +440,10 @@ import { firebaseConfig, FIREBASE_SDK_VERSION } from "./firebase-config.js";
         <div class="rows" id="rows">${(k.rows||[]).map((r,i)=>rowHTML(r,i,ro)).join("")}</div>
         ${ro ? "" : `<div>
           <p class="note" style="margin:0 0 6px">押すと行が増えます</p>
-          <div class="chips">${PRESETS.map((p,i)=>`<button class="chip" type="button" data-preset="${i}">${esc(p.n)}</button>`).join("")}</div>
+          <div class="chips">${allPresets().map((p,i)=>`<button class="chip" type="button" data-preset="${i}">${esc(p.n)}</button>`).join("")}
+            <button class="chip reg-open" type="button" id="openreg" aria-expanded="${S.form}">＋ 項目を登録</button></div>
         </div>
+        ${S.form ? regHTML() : ""}
         <button class="add" type="button" id="addblank">＋ 空の行を足す</button>`}
       </div>
       </div>
@@ -439,8 +498,33 @@ import { firebaseConfig, FIREBASE_SDK_VERSION } from "./firebase-config.js";
     if(t.id === "back"){ if(id && S.dirty.has(id)) flush(id); location.hash = ""; return; }
     if(!id || !S.map.has(id)) return;
     const k = S.map.get(id);
+    if(t.id === "openreg"){ S.form = !S.form; renderDetail(id); if(S.form){ const el = document.getElementById("reg-n"); if(el) el.focus(); } return; }
+    if(t.id === "reg-cancel"){ S.form = false; renderDetail(id); return; }
+    if(t.id === "reg-ok"){
+      const name = document.getElementById("reg-n").value.trim();
+      const price = n(document.getElementById("reg-p").value);
+      let unit = document.getElementById("reg-u").value;
+      if(unit === "__new") unit = document.getElementById("reg-unew").value.trim();
+      if(!name){ toast("項目の名前を入れてください"); document.getElementById("reg-n").focus(); return; }
+      if(!unit){ toast("新しい単位を入れてください"); document.getElementById("reg-unew").focus(); return; }
+      if(allPresets().some(p => p.n === name)){ toast("「" + name + "」はもうあります"); return; }
+      if(!allUnits().includes(unit)) saveCustom("units", unit, true);
+      saveCustom("presets", {n:name, p:price, u:unit}, true);
+      S.form = false; renderDetail(id); toast("「" + name + "」を登録しました");
+      return;
+    }
+    if(t.dataset.delp !== undefined){
+      const p = S.custom.presets[+t.dataset.delp];
+      if(p){ saveCustom("presets", p, false); renderDetail(id); toast("「" + p.n + "」を消しました（入力ずみの行はそのまま）"); }
+      return;
+    }
+    if(t.dataset.delu !== undefined){
+      const u = t.dataset.delu;
+      saveCustom("units", u, false); renderDetail(id); toast("単位「" + u + "」を消しました（入力ずみの行はそのまま）");
+      return;
+    }
     if(t.dataset.preset !== undefined){
-      const p = PRESETS[+t.dataset.preset];
+      const p = allPresets()[+t.dataset.preset]; if(!p) return;
       k.rows = k.rows || []; k.rows.push({n:p.n, p:p.p, q:"", u:p.u});
       touch(id); renderDetail(id);
       const el = document.getElementById(`r${k.rows.length-1}-q`); if(el) el.focus();
@@ -474,12 +558,42 @@ import { firebaseConfig, FIREBASE_SDK_VERSION } from "./firebase-config.js";
     touch(id); updateBar(k);
   });
   app.addEventListener("change", e => {
-    if(e.target.tagName === "SELECT") e.target.dispatchEvent(new Event("input",{bubbles:true}));
+    const t = e.target;
+    if(t.id === "reg-u"){ const box = document.getElementById("reg-unew"); box.hidden = t.value !== "__new"; if(!box.hidden) box.focus(); return; }
+    if(t.tagName !== "SELECT") return;
+    if(t.value === "__new"){
+      const row = t.closest("[data-i]"); const id = openId(); if(!row || !id) return;
+      S.newUnitRow = +row.dataset.i; renderDetail(id);
+      const el = document.getElementById(`r${S.newUnitRow}-unew`); if(el) el.focus();
+      return;
+    }
+    t.dispatchEvent(new Event("input",{bubbles:true}));
+  });
+  // 行の中で新しい単位を入れる：Enter で決定、Esc でやめる
+  function commitUnit(el, keep){
+    const i = +el.dataset.unew, id = openId();
+    if(S.newUnitRow !== i || !id || !S.map.has(id)) return;
+    S.newUnitRow = null;
+    const u = el.value.trim();
+    if(keep && u){
+      const k = S.map.get(id);
+      if(!allUnits().includes(u)) saveCustom("units", u, true);
+      if(k.rows[i]){ k.rows[i].u = u; touch(id); }
+    }
+    renderDetail(id);
+  }
+  app.addEventListener("keydown", e => {
+    const t = e.target;
+    if(t.dataset && t.dataset.unew !== undefined){
+      if(e.key === "Enter"){ e.preventDefault(); commitUnit(t, true); }
+      else if(e.key === "Escape"){ commitUnit(t, false); }
+    }
   });
   // 金額の欄は、入れ終わったら 3けたごとに , をつける
   app.addEventListener("focusout", e => {
     const t = e.target;
-    if(t.id === "sales" || t.dataset.f === "p") t.value = fmtIn(t.value);
+    if(t.dataset.unew !== undefined){ commitUnit(t, true); return; }
+    if(t.id === "sales" || t.dataset.f === "p" || t.id === "reg-p") t.value = fmtIn(t.value);
   });
 
   async function copyText(k){
@@ -494,7 +608,7 @@ import { firebaseConfig, FIREBASE_SDK_VERSION } from "./firebase-config.js";
   let tm;
   function toast(m){ const el = document.getElementById("toast"); el.textContent = m; el.classList.add("show"); clearTimeout(tm); tm = setTimeout(()=>el.classList.remove("show"), 2800); }
 
-  window.addEventListener("hashchange", () => { window.scrollTo(0,0); render(); });
+  window.addEventListener("hashchange", () => { S.form = false; S.newUnitRow = null; window.scrollTo(0,0); render(); });
   window.addEventListener("pagehide", () => { S.dirty.forEach(id => flush(id)); });
 
   /* ---------- データにつなぐ（Firebase） ---------- */
@@ -522,6 +636,13 @@ import { firebaseConfig, FIREBASE_SDK_VERSION } from "./firebase-config.js";
     U.onAuthStateChanged(auth, user => {
       if(!user || subscribed) return;
       subscribed = true;
+      // 足した項目・単位（みんなで共有）
+      D.onSnapshot(D.doc(db, "settings", "main"), s => {
+        setCustom(s.data() || {});
+        const oid = openId();
+        if(oid && S.map.has(oid) && !S.form && S.newUnitRow === null
+           && (!app.contains(document.activeElement) || document.activeElement === document.body)) renderDetail(oid);
+      }, () => {});
       D.onSnapshot(D.collection(db, "koji"), snap => {
         const seen = new Set();
         let openChanged = false; const oid = openId();
