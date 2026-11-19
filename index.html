@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>原価かんたん計算</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="theme-color" content="#1d5c86">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Zen+Kaku+Gothic+New:wght@700;900&display=swap" rel="stylesheet">
+<style>
+/* 一覧（工事カード）→ タップで工事の中身。中身の画面は下に「売上・原価・残り」が常に出る。 */
+:root{
+  --bg:#eef1f3;
+  --card:#ffffff;
+  --ink:#1c2328;
+  --sub:#5d6a73;
+  --line:#d5dce1;
+  --accent:#1d5c86;
+  --accent-soft:#e3eef6;
+  --good:#2f7d3a; --good-bg:#e2f2e4;
+  --warn:#9a6400; --warn-bg:#fbefd6;
+  --bad:#b3392f;  --bad-bg:#f8e1de;
+  --display:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",sans-serif;
+  --body:"Noto Sans JP","Hiragino Sans","Yu Gothic",sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#14191d; --card:#1e252b; --ink:#e7ecef; --sub:#9aa7b0; --line:#323c44;
+    --accent:#6fb1de; --accent-soft:#1f3242;
+    --good:#8fd39a; --good-bg:#1c3322; --warn:#f0c062; --warn-bg:#3a2f17; --bad:#ef8a80; --bad-bg:#3d201d;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#14191d; --card:#1e252b; --ink:#e7ecef; --sub:#9aa7b0; --line:#323c44;
+  --accent:#6fb1de; --accent-soft:#1f3242;
+  --good:#8fd39a; --good-bg:#1c3322; --warn:#f0c062; --warn-bg:#3a2f17; --bad:#ef8a80; --bad-bg:#3d201d;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.5;padding:16px 16px 120px}
+.wrap{max-width:760px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr);gap:14px}
+h1{font-family:var(--display);font-weight:900;font-size:1.5rem;margin:0}
+h2{font-family:var(--display);font-size:1.15rem;margin:0}
+.num{font-variant-numeric:tabular-nums}
+.note{font-size:.88rem;color:var(--sub)}
+.card{background:var(--card);border-radius:14px;padding:16px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:10px 14px;font-weight:700}
+button:disabled{opacity:.5;cursor:default}
+.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+:root[data-theme="dark"] .primary{color:#0f1f2b}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .primary{color:#0f1f2b}}
+.ghost{background:transparent;border-color:transparent;color:var(--accent);padding:8px 4px}
+.danger{color:var(--bad)}
+input,select{font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);min-width:0}
+input:focus,select:focus,button:focus-visible,.koji:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
+input:disabled,select:disabled{opacity:.8}
+
+/* 一覧 */
+.head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.all{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}
+.all div{display:grid}
+.all b{font-size:1.05rem}
+.list{display:grid;gap:10px}
+.koji{background:var(--card);border-radius:14px;padding:14px 16px;display:grid;gap:8px;border:1px solid var(--line);cursor:pointer;text-align:left;width:100%;font-weight:400}
+.koji-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.koji-name{font-weight:700;font-size:1.05rem}
+.koji-nums{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:.95rem}
+.koji-nums span{display:grid}
+.koji-nums small{color:var(--sub);font-size:.78rem}
+.pill{flex:none;border-radius:999px;padding:4px 12px;font-weight:700;font-size:.95rem;white-space:nowrap}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.none{background:var(--line);color:var(--sub)}
+.empty{text-align:center;padding:32px 16px;color:var(--sub)}
+
+/* 工事の中身 */
+.name-in{font-size:1.2rem;font-weight:700;width:100%}
+.memo-in{width:100%}
+.sales-row{display:flex;align-items:center;gap:8px}
+.sales-row input{flex:1;font-size:1.4rem;font-weight:700;text-align:right}
+.cost-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.rows{display:grid;gap:8px}
+.row{border:1px solid var(--line);border-radius:12px;padding:10px;display:grid;gap:8px}
+.row-top{display:flex;gap:6px}
+.row-top input{flex:1}
+.del{padding:4px 12px;color:var(--bad);border-color:transparent;background:transparent;font-size:1.3rem;line-height:1}
+.calc{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.calc input{width:96px;text-align:right}
+.calc input.q{width:70px}
+.calc select{padding:9px 4px}
+.op{color:var(--sub);font-weight:700}
+.amt{margin-left:auto;font-weight:700}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{padding:7px 12px;border-radius:999px;font-weight:500;font-size:.95rem;border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.add{border-style:dashed;color:var(--accent);border-color:var(--accent);background:transparent}
+.foot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center}
+.confirm{display:none;align-items:center;gap:8px;flex-wrap:wrap}
+.confirm.show{display:flex}
+
+/* 下に固定の結果 */
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:2px solid var(--accent);padding:10px 16px calc(10px + env(safe-area-inset-bottom));z-index:5}
+.bar-in{max-width:760px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr 1.3fr;gap:8px;align-items:center}
+.bar-in div{display:grid}
+.bar-in small{color:var(--sub);font-size:.78rem}
+.bar-in b{font-size:1.05rem}
+.bar-in .left b{font-family:var(--display);font-size:1.3rem}
+.bar-in .left.good b{color:var(--good)} .bar-in .left.warn b{color:var(--warn)} .bar-in .left.bad b{color:var(--bad)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:90px;background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:10px;font-size:.92rem;opacity:0;pointer-events:none;transition:opacity .2s;z-index:6}
+.toast.show{opacity:1}
+[hidden]{display:none !important}
+
+/* 一覧の行（スマホ：名前と%が上、数字が下） */
+.koji{grid-template-areas:"name pill" "nums nums";grid-template-columns:1fr auto;align-items:start}
+.k-name{grid-area:name}
+.koji .pill{grid-area:pill}
+.koji-nums{grid-area:nums}
+.list-head{display:none}
+
+/* 工事の中身（スマホ：上から順に1列） */
+.detail{display:flex;flex-direction:column;gap:14px}
+.main,.side{display:contents}
+.c-name{order:1}.c-sales{order:2}.c-cost{order:3}.c-result{display:none}.foot{order:4}
+.rows-head{display:none}
+
+/* ===== パソコン（横に広い画面） ===== */
+@media (min-width:900px){
+  body{padding:24px 24px 40px}
+  .wrap{max-width:1180px}
+  .bar{display:none !important}
+  .toast{bottom:32px}
+
+  /* 一覧は表のように1行で並べる */
+  .list{gap:0;background:var(--card);border-radius:14px;overflow:hidden;border:1px solid var(--line)}
+  .list-head,.koji{display:grid;grid-template-columns:minmax(220px,2fr) repeat(3,minmax(120px,1fr)) 130px;grid-template-areas:none;gap:12px;align-items:center;padding:12px 20px}
+  .k-name{grid-area:auto;grid-column:1;grid-row:1}
+  .koji .pill{grid-area:auto;grid-column:5;grid-row:1}
+  .list-head{font-size:.85rem;color:var(--sub);font-weight:700;background:var(--accent-soft)}
+  .list-head span:not(:first-child){text-align:right}
+  .list-head span:last-child{text-align:center}
+  .koji{border:0;border-top:1px solid var(--line);border-radius:0}
+  .koji:hover{background:var(--accent-soft)}
+  .koji-nums{display:contents}
+  .koji-nums span{text-align:right;font-size:1rem}
+  .koji-nums small{display:none}
+  .koji .pill{justify-self:center}
+  .all{grid-template-columns:repeat(3,1fr)}
+  .all b{font-size:1.3rem}
+
+  /* 工事の中身は 左：入力 ／ 右：結果 */
+  .detail{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start}
+  .main,.side{display:grid;gap:16px}
+  .side{position:sticky;top:20px}
+  .c-result{display:grid}
+  .side > *{order:0}
+  .side .c-result{order:1}
+  .side .foot{order:2}
+  .foot{flex-direction:column;align-items:stretch}
+  .foot > button{width:100%}
+
+  /* 原価の行は表のように1行 */
+  .rows-head,.row{display:grid;grid-template-columns:minmax(160px,1fr) 120px 44px 80px 84px 130px 44px;gap:8px;align-items:center}
+  .rows-head{font-size:.82rem;color:var(--sub);font-weight:700;padding:0 10px}
+  .rows-head span:nth-child(2),.rows-head span:nth-child(6){text-align:right}
+  .row{border:0;border-bottom:1px solid var(--line);border-radius:0;padding:6px 10px}
+  .row-top,.calc{display:contents}
+  .row .del{order:7}
+  .calc input,.calc input.q{width:100%}
+  .amt{text-align:right}
+}
+.res{display:grid;gap:10px}
+.res div{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.res .big{border-top:1px solid var(--line);padding-top:10px}
+.res .big b{font-family:var(--display);font-size:2rem}
+.res .big.good b{color:var(--good)}.res .big.warn b{color:var(--warn)}.res .big.bad b{color:var(--bad)}
+@media (max-width:420px){ .bar-in b{font-size:.95rem} .bar-in .left b{font-size:1.15rem} }
+@media (prefers-reduced-motion: reduce){.toast{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="card"><p class="note">読みこみ中です…</p></div>
+</div>
+<div class="bar" id="bar" hidden></div>
+<div class="toast" id="toast" role="status"></div>
+
+<script type="module">
+import { firebaseConfig, FIREBASE_SDK_VERSION } from "./firebase-config.js";
+(function(){
+  "use strict";
+  const LKEY = "genka-koji-local-v1";
+
+  // よく使う項目（タップで追加）。単価はあとから変えられる。
+  const PRESETS = [
+    {n:"人件費", p:25000, u:"人日"},
+    {n:"残業", p:3906, u:"時間"},
+    {n:"準備片付け", p:20000, u:"人日"},
+    {n:"移動", p:15000, u:"人日"},
+    {n:"宿泊費", p:5700, u:"人泊"},
+    {n:"車両代", p:1000, u:"台日"},
+    {n:"高速代", p:12000, u:"回"},
+    {n:"ガソリン代", p:10000, u:"回"},
+    {n:"食費", p:2000, u:"人"},
+    {n:"材料費", p:0, u:"式"},
+    {n:"外注費", p:0, u:"式"},
+    {n:"購入品・経費", p:0, u:"式"}
+  ];
+  const UNITS = ["人日","時間","人泊","台日","回","人","式","kg","m","個"];
+
+  const S = {
+    mode:"loading",         // loading | db | local
+    db:null, F:null, noConfig:false,
+    readonly:false,
+    map:new Map(),          // id -> 工事データ
+    loaded:false,
+    slow:false,
+    dirty:new Set(),        // まだ保存していない工事
+    ver:{}, timers:{}, chains:{}
+  };
+
+  /* ---------- 計算 ---------- */
+  function n(v){
+    if(typeof v === "number") return isFinite(v) ? v : 0;
+    const s = String(v ?? "").replace(/[０-９．－]/g, c => String.fromCharCode(c.charCodeAt(0)-0xFEE0)).replace(/[,，円\s]/g,"");
+    const x = parseFloat(s); return isFinite(x) ? x : 0;
+  }
+  const rowAmt = r => n(r.p) * n(r.q);
+  const cost = k => (k.rows||[]).reduce((s,r)=>s+rowAmt(r),0);
+  function result(k){
+    const sales = n(k.sales), c = cost(k), left = sales - c;
+    const rate = sales > 0 ? left / sales * 100 : null;
+    return {sales, cost:c, left, rate};
+  }
+  function level(rate){
+    if(rate === null) return "none";
+    if(rate >= 30) return "good";
+    if(rate >= 10) return "warn";
+    return "bad";
+  }
+  const yen = v => Math.round(v).toLocaleString("ja-JP") + "円";
+  const pct = r => r === null ? "—" : (Math.round(r*10)/10).toFixed(1) + "%";
+  const fmtIn = v => { const x = n(v); return x ? x.toLocaleString("ja-JP") : ""; };
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const clone = o => JSON.parse(JSON.stringify(o));
+  const newId = () => "k" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+
+  /* ---------- 保存 ---------- */
+  function touch(id){
+    S.dirty.add(id);
+    S.ver[id] = (S.ver[id]||0) + 1;
+    clearTimeout(S.timers[id]);
+    S.timers[id] = setTimeout(()=>flush(id), 700);
+  }
+  function flush(id){
+    clearTimeout(S.timers[id]);
+    const v = S.ver[id];
+    S.chains[id] = (S.chains[id] || Promise.resolve()).then(()=>write(id)).then(ok => {
+      if(ok && S.ver[id] === v) S.dirty.delete(id);
+    });
+    return S.chains[id];
+  }
+  async function write(id){
+    const k = S.map.get(id); if(!k) return true;
+    k.cost = cost(k); k.sales = n(k.sales); k.updatedAt = Date.now();
+    if(S.mode === "local"){ saveLocal(); return true; }
+    try{
+      await S.F.setDoc(S.F.doc(S.db, "koji", id), clone(k));
+      return true;
+    }catch(e){
+      if(e && e.code === "permission-denied"){ toast("保存できませんでした（入力の形がおかしいか、権限がありません）"); }
+      else { toast("保存に失敗しました。電波のよい所でもう一度入れなおしてください"); }
+      return false;
+    }
+  }
+  async function remove(id){
+    S.map.delete(id); S.dirty.delete(id); clearTimeout(S.timers[id]);
+    if(S.mode === "local"){ saveLocal(); return; }
+    try{ await S.F.deleteDoc(S.F.doc(S.db, "koji", id)); }
+    catch(e){ toast("消せませんでした"); }
+  }
+  function saveLocal(){
+    try{ localStorage.setItem(LKEY, JSON.stringify([...S.map.entries()])); }catch(e){}
+  }
+  function loadLocal(){
+    try{ const a = JSON.parse(localStorage.getItem(LKEY) || "[]"); S.map = new Map(a); }catch(e){ S.map = new Map(); }
+  }
+
+  /* ---------- 画面 ---------- */
+  const app = document.getElementById("app");
+  const bar = document.getElementById("bar");
+  const openId = () => { const h = location.hash.slice(1); return h.startsWith("k-") ? h.slice(2) : null; };
+
+  function render(){
+    const id = openId();
+    if(id && S.map.has(id)) renderDetail(id);
+    else if(id && !S.loaded) { app.innerHTML = `<div class="card"><p class="note">読みこみ中です…</p></div>`; bar.hidden = true; }
+    else { if(id) history.replaceState(null,"",location.pathname + location.search); renderList(); }
+  }
+
+  function renderList(){
+    bar.hidden = true;
+    const list = [...S.map.entries()].sort((a,b)=>(b[1].updatedAt||0)-(a[1].updatedAt||0));
+    let tot = {sales:0,cost:0};
+    list.forEach(([,k])=>{ const r = result(k); tot.sales += r.sales; tot.cost += r.cost; });
+    const totRate = tot.sales > 0 ? (tot.sales - tot.cost)/tot.sales*100 : null;
+
+    const status = S.mode === "local"
+      ? `<p class="note">${S.noConfig ? "まだFirebaseにつながっていません。今はこの端末の中だけに保存されます。" : "この端末の中だけに保存されます。"}</p>`
+      : S.readonly ? `<p class="note">見るだけの権限です。入力はできません。</p>` : "";
+    const slow = (!S.loaded && S.slow) ? `<p class="note">データにつながりません。電波のよい所で開きなおしてください。</p>` : "";
+
+    let body;
+    if(!S.loaded && S.mode === "db"){
+      body = `<div class="card"><p class="note">読みこみ中です…</p>${slow}</div>`;
+    }else if(list.length === 0){
+      body = `<div class="card empty">まだ工事がありません。<br>「＋ 新しい工事」から始めてください。</div>`;
+    }else{
+      body = `<div class="card all" aria-label="ぜんぶの工事の合計">
+          <div><small class="note">ぜんぶの売上</small><b class="num">${yen(tot.sales)}</b></div>
+          <div><small class="note">ぜんぶの原価</small><b class="num">${yen(tot.cost)}</b></div>
+          <div><small class="note">残り</small><b class="num">${pct(totRate)}</b></div>
+        </div>
+        <div class="list">
+          <div class="list-head" aria-hidden="true"><span>工事名</span><span>売上</span><span>原価</span><span>残り</span><span>残り%</span></div>
+          ${list.map(([id,k])=>{
+          const r = result(k), lv = level(r.rate);
+          return `<button class="koji" type="button" data-open="${esc(id)}">
+            <div class="k-name"><div class="koji-name">${esc(k.name || "（名前なし）")}</div>${k.memo ? `<div class="note">${esc(k.memo)}</div>` : ""}</div>
+            <span class="pill ${lv}">${r.rate === null ? "売上なし" : "残り " + pct(r.rate)}</span>
+            <div class="koji-nums num">
+              <span><small>売上</small>${yen(r.sales)}</span>
+              <span><small>原価</small>${yen(r.cost)}</span>
+              <span><small>残り</small>${yen(r.left)}</span>
+            </div>
+          </button>`;}).join("")}</div>`;
+    }
+    app.innerHTML = `<div class="head">
+        <h1>原価かんたん計算</h1>
+        <button class="primary" type="button" id="new" ${S.readonly || S.mode==="loading" ? "disabled" : ""}>＋ 新しい工事</button>
+      </div>${status}${body}`;
+  }
+
+  function rowHTML(r,i,ro){
+    const opts = UNITS.concat(UNITS.includes(r.u) ? [] : [r.u||"式"]).map(u=>`<option${u===r.u?" selected":""}>${esc(u)}</option>`).join("");
+    const dis = ro ? "disabled" : "";
+    return `<div class="row" data-i="${i}">
+      <div class="row-top">
+        <input id="r${i}-n" data-f="n" value="${esc(r.n)}" placeholder="項目の名前" aria-label="項目の名前" ${dis}>
+        ${ro ? "" : `<button class="del" type="button" data-del="${i}" aria-label="この行を消す">×</button>`}
+      </div>
+      <div class="calc">
+        <input id="r${i}-p" data-f="p" inputmode="decimal" value="${fmtIn(r.p)}" placeholder="単価" aria-label="単価（円）" ${dis}>
+        <span class="op">円 ×</span>
+        <input class="q" id="r${i}-q" data-f="q" inputmode="decimal" value="${r.q===0||r.q===""||r.q==null?"":esc(r.q)}" placeholder="数" aria-label="数量" ${dis}>
+        <select id="r${i}-u" data-f="u" aria-label="単位" ${dis}>${opts}</select>
+        <span class="amt num" data-amt>${yen(rowAmt(r))}</span>
+      </div>
+    </div>`;
+  }
+
+  function renderDetail(id){
+    const k = S.map.get(id); const ro = S.readonly;
+    const dis = ro ? "disabled" : "";
+    app.innerHTML = `
+      <div class="head"><button class="ghost" type="button" id="back">← 工事の一覧</button></div>
+      <div class="detail">
+      <div class="main">
+      <div class="card c-name">
+        <input class="name-in" id="name" value="${esc(k.name)}" placeholder="工事名" aria-label="工事名" ${dis}>
+        <input class="memo-in" id="memo" value="${esc(k.memo)}" placeholder="メモ（注番・期間など）" aria-label="メモ" ${dis}>
+      </div>
+      <div class="card c-cost">
+        <div class="cost-head"><h2>原価</h2><b class="num" id="costsum">${yen(cost(k))}</b></div>
+        <p class="note">単価 × 数 で計算します。金額だけのものは「数」を 1 にしてください。</p>
+        <div class="rows-head" aria-hidden="true"><span>項目</span><span>単価（円）</span><span></span><span>数</span><span>単位</span><span>金額</span><span></span></div>
+        <div class="rows" id="rows">${(k.rows||[]).map((r,i)=>rowHTML(r,i,ro)).join("")}</div>
+        ${ro ? "" : `<div>
+          <p class="note" style="margin:0 0 6px">押すと行が増えます</p>
+          <div class="chips">${PRESETS.map((p,i)=>`<button class="chip" type="button" data-preset="${i}">${esc(p.n)}</button>`).join("")}</div>
+        </div>
+        <button class="add" type="button" id="addblank">＋ 空の行を足す</button>`}
+      </div>
+      </div>
+      <aside class="side">
+      <div class="card c-sales">
+        <h2>売上</h2>
+        <div class="sales-row"><input id="sales" inputmode="decimal" value="${fmtIn(k.sales)}" placeholder="0" aria-label="売上（円）" ${dis}><span>円</span></div>
+      </div>
+      <div class="card c-result" id="sideres"></div>
+      <div class="foot">
+        <button type="button" id="copy">結果をコピー</button>
+        ${ro ? "" : `<div class="confirm" id="confirm"><span>この工事を消しますか？</span>
+            <button class="danger" type="button" id="yes">消す</button><button type="button" id="no">やめる</button></div>
+          <button class="danger ghost" type="button" id="delkoji">この工事を消す</button>`}
+      </div>
+      </aside>
+      </div>`;
+    updateBar(k);
+  }
+
+  function updateBar(k){
+    const r = result(k), lv = level(r.rate);
+    bar.hidden = false;
+    bar.innerHTML = `<div class="bar-in num">
+      <div><small>売上</small><b>${yen(r.sales)}</b></div>
+      <div><small>原価</small><b>${yen(r.cost)}</b></div>
+      <div class="left ${lv}"><small>残り ${yen(r.left)}</small><b>${pct(r.rate)}</b></div>
+    </div>`;
+    const cs = document.getElementById("costsum"); if(cs) cs.textContent = yen(r.cost);
+    const sr = document.getElementById("sideres");
+    if(sr) sr.innerHTML = `<h2>結果</h2><div class="res num">
+      <div><span>売上</span><b>${yen(r.sales)}</b></div>
+      <div><span>原価</span><b>${yen(r.cost)}</b></div>
+      <div><span>残り</span><b>${yen(r.left)}</b></div>
+      <div class="big ${lv}"><span>残り%</span><b>${pct(r.rate)}</b></div>
+    </div>`;
+  }
+
+  /* ---------- 操作 ---------- */
+  app.addEventListener("click", e => {
+    const t = e.target.closest("button"); if(!t) return;
+    const id = openId();
+    if(t.dataset.open){ location.hash = "k-" + t.dataset.open; return; }
+    if(t.id === "new"){
+      const nid = newId(), now = Date.now();
+      S.map.set(nid, {name:"", memo:"", sales:0, rows:[], createdAt:now, updatedAt:now, cost:0});
+      touch(nid); flush(nid);
+      location.hash = "k-" + nid;
+      setTimeout(()=>{ const el = document.getElementById("name"); if(el) el.focus(); }, 30);
+      return;
+    }
+    if(t.id === "back"){ if(id && S.dirty.has(id)) flush(id); location.hash = ""; return; }
+    if(!id || !S.map.has(id)) return;
+    const k = S.map.get(id);
+    if(t.dataset.preset !== undefined){
+      const p = PRESETS[+t.dataset.preset];
+      k.rows = k.rows || []; k.rows.push({n:p.n, p:p.p, q:"", u:p.u});
+      touch(id); renderDetail(id);
+      const el = document.getElementById(`r${k.rows.length-1}-q`); if(el) el.focus();
+      return;
+    }
+    if(t.id === "addblank"){
+      k.rows = k.rows || []; k.rows.push({n:"", p:"", q:1, u:"式"});
+      touch(id); renderDetail(id);
+      const el = document.getElementById(`r${k.rows.length-1}-n`); if(el) el.focus();
+      return;
+    }
+    if(t.dataset.del !== undefined){ k.rows.splice(+t.dataset.del,1); touch(id); renderDetail(id); return; }
+    if(t.id === "delkoji"){ document.getElementById("confirm").classList.add("show"); t.hidden = true; return; }
+    if(t.id === "no"){ document.getElementById("confirm").classList.remove("show"); document.getElementById("delkoji").hidden = false; return; }
+    if(t.id === "yes"){ remove(id); location.hash = ""; toast("消しました"); return; }
+    if(t.id === "copy"){ copyText(k); return; }
+  });
+
+  app.addEventListener("input", e => {
+    const id = openId(); if(!id || !S.map.has(id)) return;
+    const k = S.map.get(id), t = e.target;
+    if(t.id === "name") k.name = t.value;
+    else if(t.id === "memo") k.memo = t.value;
+    else if(t.id === "sales") k.sales = n(t.value);
+    else {
+      const row = t.closest("[data-i]"); if(!row || !t.dataset.f) return;
+      const r = k.rows[+row.dataset.i];
+      r[t.dataset.f] = (t.dataset.f === "p" || t.dataset.f === "q") ? n(t.value) : t.value;
+      row.querySelector("[data-amt]").textContent = yen(rowAmt(r));
+    }
+    touch(id); updateBar(k);
+  });
+  app.addEventListener("change", e => {
+    if(e.target.tagName === "SELECT") e.target.dispatchEvent(new Event("input",{bubbles:true}));
+  });
+  // 金額の欄は、入れ終わったら 3けたごとに , をつける
+  app.addEventListener("focusout", e => {
+    const t = e.target;
+    if(t.id === "sales" || t.dataset.f === "p") t.value = fmtIn(t.value);
+  });
+
+  async function copyText(k){
+    const r = result(k);
+    const lines = [`【原価】${k.name || ""}${k.memo ? "（" + k.memo + "）" : ""}`, `売上 ${yen(r.sales)}`, `原価 ${yen(r.cost)}`];
+    (k.rows||[]).forEach(x => lines.push(`　・${x.n || "（名前なし）"}　${n(x.p).toLocaleString("ja-JP")}円×${n(x.q)}${x.u||""}　${yen(rowAmt(x))}`));
+    lines.push(`残り ${yen(r.left)}（${pct(r.rate)}）`);
+    try{ await navigator.clipboard.writeText(lines.join("\n")); toast("コピーしました。LINEやメールに貼れます"); }
+    catch(e){ toast("コピーできませんでした"); }
+  }
+
+  let tm;
+  function toast(m){ const el = document.getElementById("toast"); el.textContent = m; el.classList.add("show"); clearTimeout(tm); tm = setTimeout(()=>el.classList.remove("show"), 2800); }
+
+  window.addEventListener("hashchange", () => { window.scrollTo(0,0); render(); });
+  window.addEventListener("pagehide", () => { S.dirty.forEach(id => flush(id)); });
+
+  /* ---------- データにつなぐ（Firebase） ---------- */
+  function startLocal(){
+    S.mode = "local"; loadLocal(); S.loaded = true; render();
+  }
+  async function start(){
+    if(!firebaseConfig || !firebaseConfig.apiKey){ S.noConfig = true; startLocal(); return; }
+    const SDK = `https://www.gstatic.com/firebasejs/${FIREBASE_SDK_VERSION}`;
+    let A, U, D;
+    try{
+      [A, U, D] = await Promise.all([import(`${SDK}/firebase-app.js`), import(`${SDK}/firebase-auth.js`), import(`${SDK}/firebase-firestore.js`)]);
+    }catch(e){
+      app.innerHTML = `<div class="card"><p>アプリを読みこめませんでした。電波のよい所で開きなおしてください。</p></div>`; return;
+    }
+    const fbApp = A.initializeApp(firebaseConfig);
+    let db;
+    try{ db = D.initializeFirestore(fbApp, {localCache: D.persistentLocalCache({tabManager: D.persistentMultipleTabManager()})}); }
+    catch(e){ db = D.getFirestore(fbApp); }
+    S.db = db; S.F = D; S.mode = "db";
+    render();
+    const auth = U.getAuth(fbApp);
+    let subscribed = false;
+    const slowTimer = setTimeout(()=>{ S.slow = true; if(!openId()) render(); }, 10000);
+    U.onAuthStateChanged(auth, user => {
+      if(!user || subscribed) return;
+      subscribed = true;
+      D.onSnapshot(D.collection(db, "koji"), snap => {
+        const seen = new Set();
+        let openChanged = false; const oid = openId();
+        snap.docs.forEach(d => {
+          seen.add(d.id);
+          if(S.dirty.has(d.id)) return;
+          const prev = S.map.get(d.id);
+          const next = clone(d.data() || {});
+          if(!prev || JSON.stringify(prev) !== JSON.stringify(next)){
+            S.map.set(d.id, next);
+            if(d.id === oid) openChanged = true;
+          }
+        });
+        [...S.map.keys()].forEach(id => { if(!seen.has(id) && !S.dirty.has(id)){ S.map.delete(id); if(id === oid) openChanged = true; } });
+        if(!snap.metadata.fromCache){ clearTimeout(slowTimer); S.slow = false; }
+        S.loaded = true;
+        if(!oid) renderList();
+        else if(openChanged || !document.getElementById("name")){
+          if(!app.contains(document.activeElement) || document.activeElement === document.body) render();
+        }
+      }, err => {
+        clearTimeout(slowTimer); S.loaded = true;
+        toast("データを読みこめませんでした"); render();
+      });
+    });
+    U.signInAnonymously(auth).catch(() => {
+      clearTimeout(slowTimer); S.loaded = true;
+      toast("ログインできませんでした。電波のよい所で開きなおしてください"); render();
+    });
+  }
+  start();
+})();
+</script>
+</body>
+</html>

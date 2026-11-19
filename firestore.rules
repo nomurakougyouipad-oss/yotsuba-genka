@@ -1,0 +1,42 @@
+rules_version = '2';
+
+// 原価かんたん計算（yotsuba-genka）Firestore ルール
+// - アプリを開いた人（匿名ログイン済み）だけが読み書きできる
+// - 工事（koji）は決まった形のデータしか保存できない
+// - 工事は画面の「この工事を消す」から消せる
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function optStr(d, k, max) {
+      return !(k in d) || (d[k] is string && d[k].size() <= max);
+    }
+    function optNum(d, k) {
+      return !(k in d) || d[k] is number;
+    }
+    function validKoji(d) {
+      return d.keys().hasOnly(['name', 'memo', 'sales', 'cost', 'rows', 'createdAt', 'updatedAt'])
+        && d.keys().hasAll(['name', 'sales', 'rows', 'updatedAt'])
+        && d.name is string && d.name.size() <= 100
+        && optStr(d, 'memo', 200)
+        && d.sales is number
+        && optNum(d, 'cost')
+        && d.rows is list && d.rows.size() <= 300
+        && optNum(d, 'createdAt')
+        && d.updatedAt is number;
+    }
+
+    match /koji/{kojiId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && kojiId.size() <= 40 && validKoji(request.resource.data);
+      allow delete: if signedIn();
+    }
+
+    // それ以外はすべて禁止
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
